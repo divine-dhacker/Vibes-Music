@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MovieStreak</title>
+  <link rel="icon" type="image/png" href="newLogo.png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVYN3980H"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-1RVYN3980H');
+    /* ── Inline theme boot: runs before CSS paint to kill FOUC ── */
+    (function () {
+      var s = localStorage.getItem('ms-theme');
+      var d = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-theme', s || (d ? 'dark' : 'light'));
+    })();
+  </script>
+  <script src="https://www.youtube.com/iframe_api"></script>
+</head>
+<body class="loading">
+
+  <!-- ══════════════════════════════════════════════════════════
+       GLOBAL SKELETON OVERLAY
+       Covers full viewport during initial data load.
+       JS removes .loading from <body> to fade this out.
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="skeletonOverlay" class="skeleton-overlay" aria-hidden="true">
+    <!-- Skeleton Nav Rail -->
+    <div class="sk-nav">
+      <div class="sk-nav-logo sk-block"></div>
+      <div class="sk-nav-item sk-block"></div>
+      <div class="sk-nav-item sk-block"></div>
+      <div class="sk-nav-item sk-block"></div>
+      <div class="sk-nav-item sk-block"></div>
+      <div class="sk-nav-item sk-block"></div>
+    </div>
+    <!-- Skeleton Main Area -->
+    <div class="sk-main">
+      <!-- Skeleton Top Slider Row -->
+      <div class="sk-slider-row">
+        <div class="sk-slider-header sk-block"></div>
+        <div class="sk-slider-cards">
+          <div class="sk-card sk-block"></div>
+          <div class="sk-card sk-block"></div>
+          <div class="sk-card sk-block"></div>
+          <div class="sk-card sk-block"></div>
+          <div class="sk-card sk-block"></div>
+          <div class="sk-card sk-block"></div>
+        </div>
+      </div>
+      <!-- Skeleton Composer -->
+      <div class="sk-composer">
+        <div class="sk-avatar sk-block"></div>
+        <div class="sk-composer-input sk-block"></div>
+      </div>
+      <!-- Skeleton Feed Posts -->
+      <div class="sk-post">
+        <div class="sk-post-header">
+          <div class="sk-avatar sk-block"></div>
+          <div class="sk-post-meta">
+            <div class="sk-text-line sk-block" style="width:120px;"></div>
+            <div class="sk-text-line sk-block" style="width:70px;height:10px;margin-top:4px;"></div>
+          </div>
+        </div>
+        <div class="sk-post-image sk-block"></div>
+        <div class="sk-post-footer">
+          <div class="sk-text-line sk-block" style="width:150px;"></div>
+          <div class="sk-text-line sk-block" style="width:80px;height:10px;margin-top:6px;"></div>
+          <div class="sk-post-actions">
+            <div class="sk-action-btn sk-block"></div>
+            <div class="sk-action-btn sk-block"></div>
+            <div class="sk-action-btn sk-block"></div>
+          </div>
+        </div>
+      </div>
+      <!-- Second skeleton post (partial) -->
+      <div class="sk-post">
+        <div class="sk-post-header">
+          <div class="sk-avatar sk-block"></div>
+          <div class="sk-post-meta">
+            <div class="sk-text-line sk-block" style="width:100px;"></div>
+            <div class="sk-text-line sk-block" style="width:60px;height:10px;margin-top:4px;"></div>
+          </div>
+        </div>
+        <div class="sk-post-image sk-block" style="aspect-ratio:16/9;"></div>
+        <div class="sk-post-footer">
+          <div class="sk-text-line sk-block" style="width:130px;"></div>
+          <div class="sk-post-actions">
+            <div class="sk-action-btn sk-block"></div>
+            <div class="sk-action-btn sk-block"></div>
+          </div>
+        </div>
+      </div>
+      <!-- Skeleton genre slider mid-feed -->
+      <div class="sk-slider-row" style="margin-top:8px;">
+        <div class="sk-slider-header sk-block" style="width:160px;"></div>
+        <div class="sk-slider-cards">
+          <div class="sk-card sk-block"></div>
+          <div class="sk-card sk-block"></div>
+          <div class="sk-card sk-block"></div>
+          <div class="sk-card sk-block" style="width:180px;aspect-ratio:16/9;"></div>
+          <div class="sk-card sk-block"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       LEFT NAVIGATION RAIL
+  ══════════════════════════════════════════════════════════════ -->
+  <nav class="nav-rail" id="navRail">
+    <div class="nav-logo">
+      <i class="fas fa-film"></i>
+      <span class="nav-label">MovieStreak</span>
+    </div>
+    <div class="nav-items">
+      <a class="nav-item active" href="#" title="Feed">
+        <i class="fas fa-home"></i>
+        <span class="nav-label">Feed</span>
+      </a>
+      <a class="nav-item" href="#" title="Discover"
+         onclick="event.preventDefault(); startDiscoveryGame()">
+        <i class="fas fa-compass"></i>
+        <span class="nav-label">Discover</span>
+      </a>
+      <a class="nav-item" href="#" title="Quick Pick"
+         onclick="event.preventDefault(); openSelectionSlide()">
+        <i class="fas fa-bolt"></i>
+        <span class="nav-label">Quick Pick</span>
+      </a>
+      <!-- <a class="nav-item" href="#" title="Reels">
+        <i class="fas fa-play-circle"></i>
+        <span class="nav-label">Reels</span>
+      </a> -->
+      <!-- <a class="nav-item" href="chat.html" title="Chat">
+        <i class="fas fa-comment-dots"></i>
+        <span class="nav-label">Chat</span>
+      </a> -->
+      <!-- <a class="nav-item" href="#" title="Search" id="navSearchToggle">
+        <i class="fas fa-search"></i>
+        <span class="nav-label">Search</span>
+      </a> -->
+    </div>
+    <div class="nav-bottom">
+      <a class="nav-item" href="#" id="themeToggleBtn" title="Toggle Theme">
+        <i class="fas fa-circle-half-stroke" id="themeToggleIcon"></i>
+        <span class="nav-label">Theme</span>
+      </a>
+      <a class="nav-item" href="#" id="navFilterToggle" title="Filters">
+        <i class="fas fa-sliders-h"></i>
+        <span class="nav-label">Filters</span>
+      </a>
+      <a class="nav-item" href="#" id="navProfileBtn" title="Profile">
+        <img id="profileIcon" class="nav-avatar" src="" alt="Profile" style="display:none;">
+        <i class="fas fa-user-circle" id="navProfileIcon"></i>
+        <span class="nav-label">Profile</span>
+      </a>
+    </div>
+  </nav>
+
+  <!-- ══════════════════════════════════════════════════════════
+       MAIN CONTENT
+  ══════════════════════════════════════════════════════════════ -->
+  <main class="main-content" id="mainContent">
+
+    <!-- ── MOBILE HEADER ── -->
+    <header class="mobile-header">
+      <span class="mobile-logo"><i class="fas fa-film"></i> MovieStreak</span>
+      <div class="mobile-header-actions">
+        <i class="fas fa-bolt" id="mobileQuickPick" title="Quick Pick"></i>
+        <i class="fas fa-search" id="mobileSearchToggle" title="Search"></i>
+        <i class="fas fa-circle-half-stroke" id="mobileThemeToggle" title="Toggle Theme"></i>
+        <i class="fas fa-sliders-h" id="mobileFilterToggle" title="Filters"></i>
+        <img id="mobileProfileIcon" class="mobile-avatar" src="" alt="Profile" style="display:none;">
+        <i class="fas fa-user-circle" id="mobileNavProfileIcon"></i>
+      </div>
+    </header>
+
+    <!-- ══════════════════════════════════════════════════
+         TOP DISCOVERY SLIDER — Trending Now
+         Always visible, even for unauthenticated users
+    ══════════════════════════════════════════════════ -->
+    <section class="discovery-slider-section" id="topDiscoverySection">
+      <div class="slider-section-header">
+        <div class="slider-header-text">
+          <span class="slider-section-title">Trending Now</span>
+          <span class="slider-section-sub">Fresh picks every visit</span>
+        </div>
+        <button class="slider-refresh-btn" id="refreshTopSlider" title="Refresh">
+          <i class="fas fa-rotate-right"></i>
+        </button>
+      </div>
+      <div class="discovery-slider" id="topDiscoverySlider">
+        <div class="slider-skeleton"></div>
+        <div class="slider-skeleton"></div>
+        <div class="slider-skeleton"></div>
+        <div class="slider-skeleton"></div>
+        <div class="slider-skeleton"></div>
+      </div>
+    </section>
+
+    <!-- ── STATUS COMPOSER ── -->
+    <div class="status-composer" id="statusComposer">
+      <img id="composerAvatar" src="" alt="You" class="composer-avatar">
+      <div class="composer-input-wrap">
+        <input
+          type="text"
+          id="movieName"
+          class="composer-input"
+          placeholder="What did you watch today?"
+          autocomplete="off"
+        >
+        <button class="composer-post-btn" onclick="submitMovie()">
+          <i class="fas fa-plus"></i>
+        </button>
+        <ul id="suggestionsList" class="suggestions-list"></ul>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         COMMUNITY SLIDER — Suggested for You
+         (movies user hasn't interacted with yet)
+    ══════════════════════════════════════════════════ -->
+    <section class="discovery-slider-section" id="communitySliderSection" style="display:none;">
+      <div class="slider-section-header">
+        <div class="slider-header-text">
+          <span class="slider-section-title">Suggested for You</span>
+          <span class="slider-section-sub">Based on your community</span>
+        </div>
+        <button class="slider-refresh-btn" id="refreshCommunitySlider" title="Refresh">
+          <i class="fas fa-rotate-right"></i>
+        </button>
+      </div>
+      <div class="discovery-slider" id="communityDiscoverySlider"></div>
+    </section>
+
+    <!-- ── PERSONAL FEED (own posts + interactions only) ── -->
+    <div id="feedContainer" class="feed-container">
+      <!-- Populated by renderFeed() — shows only user's own activity -->
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         RANDOM DISCOVERY SLIDER — Bottom
+    ══════════════════════════════════════════════════ -->
+    <section class="discovery-slider-section" id="randomDiscoverySection" style="display:none;">
+      <div class="slider-section-header">
+        <div class="slider-header-text">
+          <span class="slider-section-title">Random Discoveries</span>
+          <span class="slider-section-sub">Explore movies across the globe</span>
+        </div>
+        <button class="slider-refresh-btn" id="refreshRandomSlider" title="Refresh">
+          <i class="fas fa-rotate-right"></i>
+        </button>
+      </div>
+      <div class="discovery-slider" id="randomDiscoverySlider"></div>
+    </section>
+
+  </main>
+
+  <!-- ══════════════════════════════════════════════════════════
+       FILTERS PANEL
+  ══════════════════════════════════════════════════════════════ -->
+  <aside id="filtersPanel" class="filters-panel">
+    <div class="panel-header">
+      <span>Filters</span>
+      <i class="fas fa-times panel-close" id="filterPanelClose"></i>
+    </div>
+    <div class="panel-section">
+      <label class="panel-label">Search</label>
+      <input type="text" id="searchBox" class="panel-input" placeholder="Search by title...">
+    </div>
+    <div class="panel-section">
+      <label class="panel-label">Genre</label>
+      <select id="genreFilter" class="panel-select"></select>
+    </div>
+    <div class="panel-section">
+      <label class="panel-label">Sort By</label>
+      <select id="sortOptions" class="panel-select">
+        <option value="random">Random (Default)</option>
+        <option value="date">Newest First</option>
+        <option value="likes">Most Liked</option>
+        <option value="title">A–Z Title</option>
+      </select>
+    </div>
+    <div class="panel-section panel-pills">
+      <label class="panel-label">View</label>
+      <button id="myMoviesButton" class="pill-btn">My Movies</button>
+      <button id="watchedMoviesButton" class="pill-btn">Watched</button>
+      <button id="wannaWatchMoviesButton" class="pill-btn">Wanna Watch</button>
+      <button id="resetFiltersButton" class="pill-btn pill-reset" onclick="resetFilters()">Reset</button>
+    </div>
+    <div class="panel-section">
+      <label class="panel-label">Database</label>
+      <button class="pill-btn pill-danger" onclick="confirmPurgeMovies()">
+        <i class="fas fa-trash-alt"></i> Purge All Movies
+      </button>
+    </div>
+    <div class="panel-section">
+      <label class="panel-label">Recent Activity</label>
+      <div id="activityList" class="activity-list"></div>
+    </div>
+  </aside>
+  <div class="panel-overlay" id="panelOverlay"></div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       MODALS
+  ══════════════════════════════════════════════════════════════ -->
+
+  <!-- Edit Movie Name -->
+  <div id="editNameModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <span>Edit Title</span>
+        <i class="fas fa-times modal-close" onclick="closeModal('editNameModal')"></i>
+      </div>
+      <input type="text" id="editNameInput" class="modal-input">
+      <div class="modal-actions">
+        <button class="btn-primary" onclick="confirmNameEdit()">Save</button>
+        <button class="btn-ghost" onclick="closeModal('editNameModal')">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Poster -->
+  <div id="editPosterModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <span>Edit Poster</span>
+        <i class="fas fa-times modal-close" onclick="closeModal('editPosterModal')"></i>
+      </div>
+      <div class="poster-edit-options">
+        <input type="text" id="editPosterUrlInput" class="modal-input" placeholder="Paste image URL">
+        <label class="divider-label">— or —</label>
+        <input type="file" id="editPosterFileInput" accept="image/*"
+               onchange="previewPoster(event)" class="file-input">
+        <img id="posterPreview" class="poster-preview" src="" alt="">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-primary" onclick="confirmPosterEdit()">Save</button>
+        <button class="btn-ghost" onclick="closeModal('editPosterModal')">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Confirm -->
+  <div id="confirmModal" class="modal">
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <span>Delete Post</span>
+        <i class="fas fa-times modal-close" onclick="closeModal('confirmModal')"></i>
+      </div>
+      <p class="modal-body-text">This will permanently remove this movie from the feed.</p>
+      <div class="modal-actions">
+        <button id="confirmDeleteButton" class="btn-danger">Delete</button>
+        <button class="btn-ghost" onclick="closeModal('confirmModal')">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Purge Movies Confirm -->
+  <div id="purgeModal" class="modal">
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <span>Purge Movie Database</span>
+        <i class="fas fa-times modal-close" onclick="closeModal('purgeModal')"></i>
+      </div>
+      <p class="modal-body-text">
+        This will <strong>permanently delete all movies</strong> from the database.
+        User accounts, passwords, and streak data will <strong>not be affected</strong>.
+        This action cannot be undone.
+      </p>
+      <div class="modal-actions">
+        <button class="btn-danger" onclick="purgeMoviesDatabase()">
+          <i class="fas fa-trash-alt"></i> Yes, Purge Movies
+        </button>
+        <button class="btn-ghost" onclick="closeModal('purgeModal')">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Movie Details -->
+  <div id="movieDetailsModal" class="modal">
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <span id="detailTitle"></span>
+        <i class="fas fa-times modal-close" onclick="closeModal('movieDetailsModal')"></i>
+      </div>
+      <div class="detail-layout">
+        <img id="detailPoster" class="detail-poster" src="" alt="">
+        <div class="detail-info">
+          <p id="detailDescription" class="detail-plot"></p>
+          <span id="detailGenre" class="genre-chip"></span>
+        </div>
+      </div>
+      <div id="castSection" class="cast-section" style="display:none;">
+        <div class="section-label">Cast</div>
+        <div id="castList" class="cast-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       SELECTION SLIDE MODAL — Quick swipe to mark movies
+       Instagram/TikTok-inspired fullscreen swipe interface
+  ══════════════════════════════════════════════════════════════ -->
+  <div id="selectionSlideModal" class="modal modal-fullscreen">
+    <div class="sel-slide-container">
+      <!-- Header -->
+      <div class="sel-slide-header">
+        <span class="sel-slide-title">Quick Pick</span>
+        <span class="sel-slide-sub" id="selSlideCounter">1 / 10</span>
+        <button class="sel-slide-close" onclick="closeSelectionSlide()">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <!-- Card stage — poster fills vertically -->
+      <div class="sel-card-stage" id="selCardStage">
+        <div class="sel-card" id="selCurrentCard">
+          <img id="selPosterImg" class="sel-poster" src="" alt="">
+          <div class="sel-card-overlay">
+            <div class="sel-card-info">
+              <h2 class="sel-card-title" id="selCardTitle">Loading...</h2>
+              <span class="sel-card-genre" id="selCardGenre"></span>
+            </div>
+          </div>
+          <!-- Swipe hint overlays -->
+          <div class="sel-hint sel-hint-left" id="selHintLeft">
+            <i class="fas fa-times"></i>
+            <span>Skip</span>
+          </div>
+          <div class="sel-hint sel-hint-right" id="selHintRight">
+            <i class="fas fa-bookmark"></i>
+            <span>Watchlist</span>
+          </div>
+          <div class="sel-hint sel-hint-top" id="selHintTop">
+            <i class="fas fa-check"></i>
+            <span>Watched</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action buttons (tap alternative to swipe) -->
+      <div class="sel-action-row">
+        <button class="sel-btn sel-btn-skip" onclick="selAction('skip')" title="Skip">
+          <i class="fas fa-times"></i>
+        </button>
+        <button class="sel-btn sel-btn-watched" onclick="selAction('watched')" title="Watched">
+          <i class="fas fa-check"></i>
+          <span>Watched</span>
+        </button>
+        <button class="sel-btn sel-btn-wanna" onclick="selAction('wanna')" title="Watchlist">
+          <i class="fas fa-bookmark"></i>
+          <span>Watchlist</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Discovery Game -->
+  <div id="discoveryGameModal" class="modal">
+    <div class="modal-content modal-discovery">
+      <div class="modal-header">
+        <span>Discover</span>
+        <i class="fas fa-times modal-close" onclick="closeDiscoveryGame()"></i>
+      </div>
+      <img id="gameMoviePoster"
+           src="https://images.unsplash.com/photo-1596727147705-61849a613f17?q=80&w=780"
+           alt="Movie poster" class="game-poster">
+      <span id="gameMovieTitle" class="game-title">Finding Movies...</span>
+      <div class="game-actions">
+        <button class="game-btn game-watched" onclick="handleGameAction('watched')">
+          <i class="fas fa-check"></i> Watched
+        </button>
+        <button class="game-btn game-wanna" onclick="handleGameAction('wanna-watch')">
+          <i class="fas fa-bookmark"></i> Want to Watch
+        </button>
+        <button class="game-btn game-skip" onclick="handleGameAction('not-interested')">
+          <i class="fas fa-times"></i> Skip
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Login / Signup -->
+  <div id="loginModal" class="modal visible">
+    <div class="modal-content modal-login">
+      <div class="login-brand">
+        <i class="fas fa-film login-brand-icon"></i>
+        <h2 class="login-title">MovieStreak</h2>
+        <p class="login-sub">Track. Discover. Share.</p>
+      </div>
+      <div class="login-form">
+        <div class="profile-pic-upload">
+          <img id="profilePicPreview" class="profile-pic-preview"
+               src="https://ui-avatars.com/api/?name=User&background=111&color=fff&size=128&bold=true&font-size=0.5"
+               alt="Avatar">
+          <label for="profilePicFile" class="upload-pic-btn">
+            <i class="fas fa-camera"></i>
+          </label>
+          <input type="file" id="profilePicFile" accept="image/*" onchange="previewProfilePic(event)">
+        </div>
+        <input type="text" id="loginNameInput" class="modal-input" placeholder="Username">
+        <div class="password-wrap">
+          <input type="password" id="loginPasswordInput" class="modal-input" placeholder="Password">
+          <i id="passwordToggle" class="fas fa-eye pass-toggle"></i>
+        </div>
+        <button class="btn-primary btn-full" onclick="handleLoginButtonClick()">Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Profile Modal -->
+  <div id="profileModal" class="modal">
+    <div class="modal-content modal-profile">
+      <div class="modal-header">
+        <span>Profile</span>
+        <i class="fas fa-times modal-close" onclick="closeModal('profileModal')"></i>
+      </div>
+      <div class="profile-hero">
+        <img id="profilePicModal" class="profile-hero-pic" src="" alt="">
+        <div>
+          <h3 id="profileNameModal" class="profile-hero-name"></h3>
+          <div class="streak-row">
+            <i id="streakFireIcon" class="fas fa-fire streak-fire"></i>
+            <span class="streak-label">Streak:</span>
+            <span id="streakCountModal" class="streak-count">0</span>
+            <span class="streak-label">days</span>
+          </div>
+        </div>
+      </div>
+      <div class="profile-actions">
+        <button class="btn-outline" onclick="closeModal('profileModal'); startDiscoveryGame();">
+          <i class="fas fa-compass"></i> Start Discovery
+        </button>
+        <button class="btn-outline" onclick="closeModal('profileModal'); openSelectionSlide();">
+          <i class="fas fa-bolt"></i> Quick Pick
+        </button>
+        <button id="discoveryBoostBtn" class="btn-outline btn-boost"
+                style="display:none;" onclick="startDiscoveryGame(5)">
+          <i class="fas fa-bolt"></i> Boost
+        </button>
+      </div>
+      <div class="milestones-section">
+        <div class="section-label">Milestones</div>
+        <div class="milestones-grid">
+          <div id="badge-7" class="badge-item">
+            <div class="badge-icon-wrap"><i class="fas fa-star"></i></div>
+            <span>7 Days</span>
+          </div>
+          <div id="badge-30" class="badge-item">
+            <div class="badge-icon-wrap"><i class="fas fa-medal"></i></div>
+            <span>30 Days</span>
+          </div>
+          <div id="badge-100" class="badge-item">
+            <div class="badge-icon-wrap"><i class="fas fa-crown"></i></div>
+            <span>100 Days</span>
+          </div>
+        </div>
+      </div>
+      <button class="btn-ghost btn-full logout-btn" onclick="logout()">
+        <i class="fas fa-sign-out-alt"></i> Log Out
+      </button>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast"></div>
+
+  <!-- Share FAB -->
+  <button class="share-fab" id="shareFab" title="Share App"
+          onclick="shareContent('Check out MovieStreak!', window.location.href)">
+    <i class="fas fa-share-nodes"></i>
+  </button>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-messaging-compat.js"></script>
+  <script src="script.js"></script>
+  <script src="type.js"></script>
+</body>
+</html>
