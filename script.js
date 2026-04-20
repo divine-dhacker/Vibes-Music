@@ -42,6 +42,13 @@ let youtubePlayerReady = false;
 let cachedReelPool  = [];
 let reelPoolFetching = false;
 
+let sessionBlacklist = new Set();
+let feedPage = 0;
+let searchTimeout;
+let discoveryPage = 1;
+let isFetchingNextPage = false;
+let hasMoreMovies = true;
+
 // Genre sliders injected into feed
 const GENRE_INJECT_INTERVAL = 4;    // inject a genre slider every N posts
 const REEL_INJECT_INTERVAL  = 7;    // inject a standalone reel every N posts
@@ -182,7 +189,7 @@ function loadMovies() {
         movieUsers.streakLeaderId = streakLeaderId;
         updateStreakDisplay(currentStreakCount);
 
-        moviesRef.on('value', movieSnap => {
+        moviesRef.limitToLast(10).on('value', movieSnap => {
             allMovies = [];
             const genres = new Set(['All']);
 
@@ -191,11 +198,15 @@ function loadMovies() {
                 allMovies.push(movie);
                 if (movie.genre) movie.genre.split(', ').forEach(g => genres.add(g.trim()));
             });
+            // Reverse so newest are at the top for personal interleave
+            allMovies.reverse();
 
             updateGenreFilter(Array.from(genres).sort());
 
-            // Render everything, then dismiss skeleton
-            renderFeed().then(() => {
+            // Reset and render feed
+            feedPage = 0;
+            hasMoreMovies = true;
+            renderFeed(true).then(() => {
                 renderDiscoverySliders();
                 dismissSkeleton();
             });
@@ -224,71 +235,62 @@ function shuffleArray(arr) {
 }
 
 /**
- * Returns movies that belong to the current user's personal feed:
- *   1. Movies the user uploaded (owner === currentUserId)
- *   2. Movies the user has liked, watched, or added to watchlist
- * Other users' unseen content is deliberately excluded.
- */
-function getPersonalizedMovies() {
-    if (!currentUserId) return [];
-    return allMovies.filter(movie => {
-        const isOwner    = movie.owner === currentUserId;
-        const hasLiked   = movie.likes         && movie.likes[currentUserId];
-        const hasWatched = movie.watchedBy      && movie.watchedBy[currentUserId];
-        const hasWanna   = movie.wannaWatchBy   && movie.wannaWatchBy[currentUserId];
-        return isOwner || hasLiked || hasWatched || hasWanna;
-    });
-}
-
-/**
- * Apply filter controls to a given list.
- * Default sort = 'random' (Fisher-Yates shuffled on every render).
- */
-function applyFilters(movies) {
-    let filtered = [...movies];
-
-    if (currentFilter.genre !== 'all') {
-        filtered = filtered.filter(m => m.genre && m.genre.toLowerCase().includes(currentFilter.genre));
-    }
-    // myMovies, watchedMovies, wannaWatchMovies — already scoped to personal; these narrow further
-    if (currentFilter.myMovies) {
-        filtered = filtered.filter(m => m.owner === currentUserId);
-    }
-    if (currentFilter.watchedMovies) {
-        filtered = filtered.filter(m => m.watchedBy && m.watchedBy[currentUserId]);
-    }
-    if (currentFilter.wannaWatchMovies) {
-        filtered = filtered.filter(m => m.wannaWatchBy && m.wannaWatchBy[currentUserId]);
-    }
-    if (currentFilter.search) {
-        const s = currentFilter.search.toLowerCase();
-        filtered = filtered.filter(m => m.name.toLowerCase().includes(s));
-    }
-
-    switch (currentFilter.sort) {
-        case 'random': filtered = shuffleArray(filtered); break;
-        case 'date':   filtered.sort((a, b) => (b.lastUpdated || 0) - (a.lastUpdated || 0)); break;
-        case 'likes':  filtered.sort((a, b) => Object.keys(b.likes || {}).length - Object.keys(a.likes || {}).length); break;
-        case 'title':  filtered.sort((a, b) => a.name.localeCompare(b.name)); break;
-        default:       filtered = shuffleArray(filtered);
-    }
-    return filtered;
-}
-
-/**
  * Async feed renderer.
- * Injects genre sliders and inline reels at defined intervals.
- * Only uses personalized movie set.
+ * Prioritizes Discovery-First algorithm: fetches from TMDb and interleaves Personal movies.
  */
-async function renderFeed() {
+async function renderFeed(reset = false) {
+    if (isFetchingNextPage) return;
+    isFetchingNextPage = true;
+
     const feed = document.getElementById('feedContainer');
-    feed.innerHTML = '';
+    if (reset) {
+        feed.innerHTML = '';
+        feedPage = 0;
+        discoveryPage = 1;
+        hasMoreMovies = true;
+    }
 
-    const personal  = getPersonalizedMovies();
-    const filtered  = applyFilters(personal);
+    // 1. Fetch Discovery movies from TMDb
+    let discoveryItems = [];
+    try {
+        const page = discoveryPage;
+        const res = await fetch(`${tmdbBaseUrl}/discover/movie?api_key=${tmdbApiKey}&page=${page}&sort_by=popularity.desc&include_adult=false`);
+        const data = await res.json();
+        discoveryItems = (data.results || []).filter(m => m.poster_path && !sessionBlacklist.has(m.id));
+        discoveryPage++;
+        if (discoveryItems.length === 0) hasMoreMovies = false;
+    } catch (e) {
+        console.error("Discovery fetch failed", e);
+        hasMoreMovies = false;
+    }
 
-    if (filtered.length === 0) {
+    // 2. Interleave Personal movies (tracked)
+    // We take a few from allMovies (which is limited to latest 20)
+    const personal = allMovies.filter(m => !discoveryItems.some(di => di.id === m.tmdbId)).slice(feedPage * 2, (feedPage + 1) * 2);
+
+    // Mix them
+    let pageItems = discoveryItems.slice(0, 8).map(m => {
+        const tracked = allMovies.find(am => am.tmdbId === m.id);
+        if (tracked) return { ...tracked, isTracked: true };
+        return {
+            name: m.title,
+            poster: `${tmdbImageBase}${m.poster_path}`,
+            tmdbId: m.id,
+            genre: '',
+            likes: {}, watchedBy: {}, wannaWatchBy: {},
+            isDiscovery: true
+        };
+    });
+
+    // Inject personal ones at random spots
+    personal.forEach(p => {
+        const idx = Math.floor(Math.random() * pageItems.length);
+        pageItems.splice(idx, 0, { ...p, isTracked: true });
+    });
+
+    if (pageItems.length === 0 && reset) {
         feed.appendChild(buildEmptyState());
+        isFetchingNextPage = false;
         return;
     }
 
@@ -296,35 +298,91 @@ async function renderFeed() {
 
     let reelQueue        = shuffleArray([...cachedReelPool]);
     let genreQueue       = shuffleArray([...FEATURED_GENRES]);
-    let postIndex        = 0;
-    let genreSliderCount = 0;
+    let postIndex        = feedPage * 10;
+    let genreSliderCount = Math.floor(postIndex / GENRE_INJECT_INTERVAL);
 
-    for (const movie of filtered) {
-        // Fetch trailer for very first post only (rate limit friendly)
+    for (const movie of pageItems) {
+        if (sessionBlacklist.has(movie.tmdbId)) continue;
+
+        // Randomly inject Quick Pick directly into feed
+        if (Math.random() < 0.1) {
+             const qpContainer = document.createElement('div');
+             qpContainer.className = 'quick-pick-in-feed';
+             feed.appendChild(qpContainer);
+             renderQuickPickInFeed(qpContainer);
+        }
+
         let youtubeId = null;
-        if (postIndex === 0 && movie.tmdbId) {
+        if (movie.tmdbId) {
             youtubeId = await fetchYouTubeTrailerId(movie.name, movie.tmdbId);
         }
 
-        // Decide if this video should be 9:16 IG format
         const useIgReel = youtubeId && Math.random() < IG_REEL_PROBABILITY;
         const card = createPostCard(movie, { youtubeId, useIgReel });
         feed.appendChild(card);
+    observeCardForMemoryManagement(card);
         postIndex++;
 
-        // ── Inject genre slider every N posts ──
         if (postIndex % GENRE_INJECT_INTERVAL === 0) {
             const genre = genreQueue[genreSliderCount % genreQueue.length];
             genreSliderCount++;
             const genreSection = await createFeedGenreSlider(genre);
-            if (genreSection) feed.appendChild(genreSection);
+            if (genreSection) {
+                feed.appendChild(genreSection);
+                observeCardForMemoryManagement(genreSection);
+            }
         }
 
-        // ── Inject standalone reel every REEL_INJECT_INTERVAL posts ──
         if (postIndex % REEL_INJECT_INTERVAL === 0 && reelQueue.length > 0) {
             const reel = reelQueue.shift();
-            feed.appendChild(createInlineFeedReel(reel.id, reel.title));
+            const reelEl = createInlineFeedReel(reel.id, reel.title);
+            feed.appendChild(reelEl);
+            observeCardForMemoryManagement(reelEl);
         }
+    }
+
+    feedPage++;
+    isFetchingNextPage = false;
+    setupInfiniteScroll();
+}
+
+let scrollObserver;
+function setupInfiniteScroll() {
+    if (scrollObserver) scrollObserver.disconnect();
+
+    scrollObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && hasMoreMovies && !isFetchingNextPage) {
+            renderFeed();
+        }
+    }, { rootMargin: '200px' });
+
+    const lastChild = document.getElementById('feedContainer').lastElementChild;
+    if (lastChild) scrollObserver.observe(lastChild);
+}
+
+async function renderQuickPickInFeed(container) {
+    container.innerHTML = '<div class="slider-skeleton" style="width:100%; aspect-ratio:16/9;"></div>';
+    // Similar to openSelectionSlide but embedded
+    try {
+        const page = Math.floor(Math.random() * 50) + 1;
+        const url  = `${tmdbBaseUrl}/discover/movie?api_key=${tmdbApiKey}&sort_by=popularity.desc&include_adult=false&page=${page}&language=en-US`;
+        const res  = await fetch(url);
+        const data = await res.json();
+        const movies  = shuffleArray((data.results || []).filter(m => m.poster_path)).slice(0, 3);
+
+        container.innerHTML = `
+            <div class="section-divider"><span>Quick Pick</span></div>
+            <div class="discovery-slider"></div>
+        `;
+        const slider = container.querySelector('.discovery-slider');
+        movies.forEach(m => {
+            slider.appendChild(createSliderCard({
+                name: m.title, poster: `${tmdbImageBase}${m.poster_path}`,
+                genre: '', tmdbId: m.id, isExternalTmdb: true
+            }));
+        });
+    } catch (e) {
+        container.remove();
     }
 }
 
@@ -531,23 +589,38 @@ async function renderRandomDiscoverySlider() {
 // ════════════════════════════════════════════════════════════════
 
 /**
- * Compact slider card (2:3 poster)
+ * Compact slider card (9:16 poster)
  */
 function createSliderCard(movie) {
-    const isLiked      = !!(movie.likes && movie.likes[currentUserId]);
     const isWatched    = !!(movie.watchedBy && movie.watchedBy[currentUserId]);
     const isWannaWatch = !!(movie.wannaWatchBy && movie.wannaWatchBy[currentUserId]);
+    const isTracked    = isWatched || isWannaWatch;
 
     const card = document.createElement('div');
     card.className = 'slider-card';
-    if (isWatched)    card.classList.add('is-watched');
-    if (isWannaWatch) card.classList.add('is-wanna');
+    if (isTracked) card.classList.add('is-tracked');
 
     const img = document.createElement('img');
     img.className = 'slider-card-poster';
-    img.src     = movie.poster || 'https://images.unsplash.com/photo-1596727147705-61849a613f17?q=80&w=300';
-    img.alt     = movie.name || '';
+    // Use low-res placeholder then swap to HD
+    img.src = movie.poster ? movie.poster.replace('w500', 'w92') : 'https://images.unsplash.com/photo-1596727147705-61849a613f17?q=80&w=92';
+    img.alt = movie.name || '';
     img.loading = 'lazy';
+
+    const hdImage = new Image();
+    hdImage.src = movie.poster || 'https://images.unsplash.com/photo-1596727147705-61849a613f17?q=80&w=300';
+    hdImage.onload = () => { img.src = hdImage.src; };
+
+    const xBtn = document.createElement('button');
+    xBtn.className = 'not-interested-btn';
+    xBtn.innerHTML = '<i class="fas fa-times"></i>';
+    xBtn.onclick = (e) => {
+        e.stopPropagation();
+        sessionBlacklist.add(movie.tmdbId);
+        card.classList.add('fadeOut');
+        setTimeout(() => card.remove(), 500);
+    };
+    card.appendChild(xBtn);
 
     const body = document.createElement('div');
     body.className = 'slider-card-body';
@@ -558,30 +631,14 @@ function createSliderCard(movie) {
 
     const metaEl = document.createElement('div');
     metaEl.className = 'slider-card-meta truncate';
-    metaEl.textContent = movie.isExternalTmdb
-        ? 'TMDb'
-        : (Object.keys(movie.likes || {}).length > 0 ? `♥ ${Object.keys(movie.likes).length}` : '');
+    metaEl.textContent = movie.isExternalTmdb ? 'TMDb' : 'Added';
 
-    const actionsEl = document.createElement('div');
-    actionsEl.className = 'slider-card-actions';
-
-    const likeI = document.createElement('i');
-    likeI.className = `fas fa-heart${isLiked ? ' liked' : ''}`;
-    likeI.title = 'Like';
-    likeI.addEventListener('click', (e) => { e.stopPropagation(); if (movie.key) toggleLike(movie.key); });
-
-    const wannaI = document.createElement('i');
-    wannaI.className = `fas fa-bookmark${isWannaWatch ? ' wanna-watch' : ''}`;
-    wannaI.title = 'Watchlist';
-    wannaI.addEventListener('click', (e) => { e.stopPropagation(); if (movie.key) toggleWannaWatch(movie.key); });
-
-    actionsEl.append(likeI, wannaI);
-    body.append(titleEl, metaEl, actionsEl);
+    body.append(titleEl, metaEl);
     card.append(img, body);
 
     card.addEventListener('click', () => {
         if (movie.key && !movie.isExternalTmdb) showMovieDetails(movie.key);
-        else if (movie.tmdbId) window.open(`https://www.themoviedb.org/movie/${movie.tmdbId}`, '_blank');
+        else if (movie.tmdbId) showMovieDetailsFromTmdbId(movie.tmdbId);
     });
     return card;
 }
@@ -594,10 +651,21 @@ function createSliderReelCard(youtubeId, title) {
     card.className = 'slider-reel-card';
     const iframe = document.createElement('iframe');
     iframe.className = 'slider-reel-frame';
-    iframe.src = `https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1`;
+    iframe.src = `https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1&enablejsapi=1`;
     iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
     iframe.allowFullscreen = true;
     iframe.loading = 'lazy';
+
+    iframe.onload = () => {
+        if (window.YT && YT.Player) {
+            new YT.Player(iframe, {
+                events: {
+                    'onStateChange': (e) => { if (e.data === YT.PlayerState.PLAYING) pauseOtherVideos(iframe); }
+                }
+            });
+        }
+    };
+
     const label = document.createElement('div');
     label.className = 'slider-reel-label truncate';
     label.textContent = title || 'Trailer';
@@ -619,10 +687,20 @@ function createTallReelCard(youtubeId, title) {
 
     const iframe = document.createElement('iframe');
     iframe.className = 'slider-reel-frame-tall';
-    iframe.src = `https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1`;
+    iframe.src = `https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1&enablejsapi=1`;
     iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
     iframe.allowFullscreen = true;
     iframe.loading = 'lazy';
+
+    iframe.onload = () => {
+        if (window.YT && YT.Player) {
+            new YT.Player(iframe, {
+                events: {
+                    'onStateChange': (e) => { if (e.data === YT.PlayerState.PLAYING) pauseOtherVideos(iframe); }
+                }
+            });
+        }
+    };
 
     const label = document.createElement('div');
     label.className = 'reel-tall-label truncate';
@@ -640,55 +718,33 @@ function createTallReelCard(youtubeId, title) {
 function createPostCard(movie, opts = {}) {
     const { youtubeId = null, useIgReel = false } = opts;
 
-    const isOwner      = movie.owner === currentUserId;
-    const likeCount    = Object.keys(movie.likes || {}).length;
     const isLiked      = !!(movie.likes && movie.likes[currentUserId]);
     const isWatched    = !!(movie.watchedBy && movie.watchedBy[currentUserId]);
-    const isWannaWatch = !!(movie.wannaWatchBy && movie.wannaWatchBy[currentUserId]) && !isWatched;
-    const isStreakLeader = movieUsers.streakLeaderId === movie.owner;
-
-    const ownerData = movieUsers[movie.owner] || {};
-    const ownerName = ownerData.name || 'You';
-    const ownerPic  = ownerData.picUrl || generateAvatarUrl(ownerName);
+    const isWannaWatch = !!(movie.wannaWatchBy && movie.wannaWatchBy[currentUserId]);
+    const isTracked    = isWatched || isWannaWatch || movie.isTracked;
 
     const article = document.createElement('article');
     article.className = 'post-card';
-    article.dataset.key = movie.key;
+    if (isTracked) article.classList.add('is-tracked');
+    article.dataset.key = movie.key || '';
+    article.dataset.tmdbId = movie.tmdbId || '';
 
-    // ── Header ──
-    const header = document.createElement('div');
-    header.className = 'post-header';
-
-    const avatarWrap = document.createElement('div');
-    avatarWrap.className = 'post-avatar-wrap';
-    const avatarImg = document.createElement('img');
-    avatarImg.className = 'post-avatar';
-    avatarImg.src = ownerPic; avatarImg.alt = ownerName; avatarImg.loading = 'lazy';
-    avatarWrap.appendChild(avatarImg);
-    if (isStreakLeader) { const ring = document.createElement('div'); ring.className = 'streak-leader-ring'; avatarWrap.appendChild(ring); }
-
-    const headerInfo = document.createElement('div');
-    headerInfo.className = 'post-header-info';
-    headerInfo.innerHTML = `<div class="post-username truncate">${escHtml(ownerName)}</div><div class="post-timestamp">${timeSince(movie.lastUpdated)} ago</div>`;
-
-    const menuWrap = document.createElement('div');
-    menuWrap.className = 'post-menu';
-
-    if (isOwner) {
-        const editNameBtn = makeMenuBtn('fa-pencil-alt', 'Edit title', () => editMovieName(movie.key, movie.name));
-        const editPosterBtn = makeMenuBtn('fa-image', 'Edit poster', () => editMoviePoster(movie.key));
-        const deleteBtn = makeMenuBtn('fa-trash-alt', 'Delete', () => showDeleteConfirm(movie.key));
-        menuWrap.append(editNameBtn, editPosterBtn, deleteBtn);
-    }
-
-    header.append(avatarWrap, headerInfo, menuWrap);
+    const xBtn = document.createElement('button');
+    xBtn.className = 'not-interested-btn';
+    xBtn.innerHTML = '<i class="fas fa-times"></i>';
+    xBtn.onclick = (e) => {
+        e.stopPropagation();
+        sessionBlacklist.add(movie.tmdbId);
+        article.classList.add('fadeOut');
+        setTimeout(() => article.remove(), 500);
+    };
+    article.appendChild(xBtn);
 
     // ── Media ──
     const media = document.createElement('div');
 
     if (youtubeId) {
         if (useIgReel) {
-            // Instagram 9:16 format
             media.className = 'post-media post-media-reel';
             const iframe = document.createElement('iframe');
             iframe.className = 'post-youtube-frame';
@@ -699,8 +755,20 @@ function createPostCard(movie, opts = {}) {
             badge.className = 'post-reel-badge';
             badge.textContent = 'Reel';
             media.append(iframe, badge);
+
+            iframe.onload = () => {
+                const player = new YT.Player(iframe, {
+                    events: {
+                        'onStateChange': (event) => {
+                            if (event.data === YT.PlayerState.PLAYING) {
+                                pauseOtherVideos(iframe);
+                                trackImplicitInteraction(movie.tmdbId, 'play');
+                            }
+                        }
+                    }
+                });
+            };
         } else {
-            // Standard 16:9 landscape
             media.className = 'post-media post-media-wide';
             const iframe = document.createElement('iframe');
             iframe.className = 'post-youtube-frame';
@@ -708,14 +776,33 @@ function createPostCard(movie, opts = {}) {
             iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
             iframe.allowFullscreen = true; iframe.loading = 'lazy';
             media.appendChild(iframe);
+
+            iframe.onload = () => {
+                const player = new YT.Player(iframe, {
+                    events: {
+                        'onStateChange': (event) => {
+                            if (event.data === YT.PlayerState.PLAYING) {
+                                pauseOtherVideos(iframe);
+                                trackImplicitInteraction(movie.tmdbId, 'play');
+                            }
+                        }
+                    }
+                });
+            };
         }
     } else {
         media.className = 'post-media';
         media.addEventListener('click', () => showMovieDetails(movie.key));
         const posterImg = document.createElement('img');
         posterImg.className = 'post-poster';
-        posterImg.src = movie.poster || 'https://images.unsplash.com/photo-1596727147705-61849a613f17?q=80&w=400';
+        // Low-res placeholder
+        posterImg.src = movie.poster ? movie.poster.replace('w500', 'w92') : 'https://images.unsplash.com/photo-1596727147705-61849a613f17?q=80&w=92';
         posterImg.alt = movie.name || ''; posterImg.loading = 'lazy';
+
+        const hdImage = new Image();
+        hdImage.src = movie.poster || 'https://images.unsplash.com/photo-1596727147705-61849a613f17?q=80&w=400';
+        hdImage.onload = () => { posterImg.src = hdImage.src; };
+
         const overlay = document.createElement('div');
         overlay.className = 'post-media-overlay';
         overlay.innerHTML = '<i class="fas fa-expand post-media-play"></i>';
@@ -737,19 +824,13 @@ function createPostCard(movie, opts = {}) {
         caption.appendChild(g);
     }
 
-    const chips = document.createElement('div');
-    chips.className = 'post-state-chips';
-    if (isWatched)   { const c = document.createElement('span'); c.className = 'state-chip watched'; c.textContent = '✓ Watched'; chips.appendChild(c); }
-    if (isWannaWatch){ const c = document.createElement('span'); c.className = 'state-chip wanna-watch'; c.textContent = '+ Watchlist'; chips.appendChild(c); }
-    if (chips.children.length) caption.appendChild(chips);
-
     // ── Actions ──
     const actions = document.createElement('div');
     actions.className = 'post-actions';
 
     const likeBtn = document.createElement('button');
     likeBtn.className = `post-action-btn${isLiked ? ' liked' : ''}`;
-    likeBtn.innerHTML = `<i class="fas fa-heart"></i><span class="post-action-count">${likeCount > 0 ? likeCount : ''}</span>`;
+    likeBtn.innerHTML = `<i class="fas fa-heart"></i>`;
     likeBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleLike(movie.key); });
 
     const watchedBtn = document.createElement('button');
@@ -764,14 +845,87 @@ function createPostCard(movie, opts = {}) {
 
     const spacer = document.createElement('div'); spacer.className = 'post-actions-spacer';
 
-    const shareBtn = document.createElement('button');
-    shareBtn.className = 'post-action-btn';
-    shareBtn.innerHTML = '<i class="fas fa-share-nodes"></i>';
-    shareBtn.addEventListener('click', (e) => { e.stopPropagation(); shareFirebaseMovie(movie.name); });
-
-    actions.append(likeBtn, watchedBtn, wannaBtn, spacer, shareBtn);
-    article.append(header, media, caption, actions);
+    actions.append(likeBtn, watchedBtn, wannaBtn, spacer);
+    article.append(media, caption, actions);
     return article;
+}
+
+/**
+ * Monitor implicit interactions for Discovery Engine
+ */
+function trackImplicitInteraction(movieId, type) {
+    if (!movieId) return;
+    // For now, session-based implicit tracking
+    // We can fetch related movies based on this
+    fetchRelatedMovies(movieId);
+}
+
+async function fetchRelatedMovies(movieId) {
+    try {
+        const res = await fetch(`${tmdbBaseUrl}/movie/${movieId}/recommendations?api_key=${tmdbApiKey}&language=en-US&page=1`);
+        const data = await res.json();
+        const related = data.results || [];
+        // Inject these into a special slider or the feed
+        if (related.length > 0) {
+            injectRelatedSlider(related);
+        }
+    } catch (e) {}
+}
+
+function injectRelatedSlider(movies) {
+    const feed = document.getElementById('feedContainer');
+    const section = document.createElement('div');
+    section.className = 'feed-genre-section';
+    section.innerHTML = `
+        <div class="feed-genre-header">
+            <div class="feed-genre-title-wrap">
+                <span class="feed-genre-name" style="background:var(--accent-tracked); color:#000;">Because you searched/watched</span>
+            </div>
+        </div>
+        <div class="discovery-slider"></div>
+    `;
+    const slider = section.querySelector('.discovery-slider');
+    movies.slice(0, 10).forEach(m => {
+        slider.appendChild(createSliderCard({
+            name: m.title, poster: `${tmdbImageBase}${m.poster_path}`,
+            genre: '', tmdbId: m.id, isExternalTmdb: true
+        }));
+    });
+    // Insert at current position (top of feed for now)
+    feed.insertBefore(section, feed.firstChild);
+}
+
+let memoryObserver;
+
+function observeCardForMemoryManagement(el) {
+    if (!memoryObserver) {
+        memoryObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                const target = entry.target;
+                if (entry.isIntersecting) {
+                    target.style.visibility = 'visible';
+                    // Re-enable heavy components if needed
+                    const posters = target.querySelectorAll('.post-poster, .slider-card-poster');
+                    posters.forEach(p => { if (p.dataset.src) { p.src = p.dataset.src; delete p.dataset.src; } });
+                } else {
+                    target.style.visibility = 'hidden';
+                    // Optimization: offload images but keep DOM structure to preserve listeners
+                    const posters = target.querySelectorAll('.post-poster, .slider-card-poster');
+                    posters.forEach(p => { if (p.src && !p.dataset.src) { p.dataset.src = p.src; p.src = ''; } });
+                }
+            });
+        }, { rootMargin: '1000px' });
+    }
+    memoryObserver.observe(el);
+}
+
+function pauseOtherVideos(currentIframe) {
+    const iframes = document.querySelectorAll('iframe');
+    iframes.forEach(iface => {
+        if (iface !== currentIframe && iface.contentWindow) {
+            iface.contentWindow.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
+        }
+    });
 }
 
 function makeMenuBtn(iconClass, title, handler) {
@@ -788,11 +942,21 @@ function createInlineFeedReel(youtubeId, title) {
     card.className = 'discovery-reel-card';
     card.innerHTML = `
         <div class="discovery-reel-label"><i class="fas fa-play-circle"></i> Discovery Reel</div>
-        <iframe class="discovery-reel-frame" src="https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1"
+        <iframe class="discovery-reel-frame" src="https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1&enablejsapi=1"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowfullscreen loading="lazy"></iframe>
         <div class="discovery-reel-title">${escHtml(title)}</div>
     `;
+    const iframe = card.querySelector('iframe');
+    iframe.onload = () => {
+        if (window.YT && YT.Player) {
+            new YT.Player(iframe, {
+                events: {
+                    'onStateChange': (e) => { if (e.data === YT.PlayerState.PLAYING) pauseOtherVideos(iframe); }
+                }
+            });
+        }
+    };
     return card;
 }
 
@@ -1036,7 +1200,6 @@ function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 const movieNameInput  = document.getElementById('movieName');
 const suggestionsList = document.getElementById('suggestionsList');
-let searchTimeout;
 
 movieNameInput.addEventListener('input', () => {
     clearTimeout(searchTimeout);
@@ -1176,31 +1339,59 @@ function confirmPosterEdit() { const u = document.getElementById('editPosterUrlI
 function saveNewPoster(url) { if (!currentEditKey) return; db.ref(`movies/${currentEditKey}`).update({ poster: url, lastUpdated: Date.now() }).then(() => { closeModal('editPosterModal'); showToast('Poster updated.'); }); }
 function showDeleteConfirm(key) { document.getElementById('confirmModal').classList.add('visible'); document.getElementById('confirmDeleteButton').onclick = () => deleteMovie(key); }
 function deleteMovie(key) { db.ref(`movies/${key}`).remove().then(() => { closeModal('confirmModal'); showToast('Post deleted.'); addActivity('deleted a movie'); }).catch(() => showToast('Error deleting.')); }
-function closeModal(id) { document.getElementById(id).classList.remove('visible'); currentEditKey = null; }
+function closeModal(id) {
+    document.getElementById(id).classList.remove('visible');
+    currentEditKey = null;
+    if (id === 'movieDetailsModal') {
+        document.getElementById('detailTrailerFrame').src = '';
+    }
+}
 
 // ════════════════════════════════════════════════════════════════
 // SECTION 14 — MOVIE DETAILS MODAL
 // ════════════════════════════════════════════════════════════════
 
+async function showMovieDetailsFromTmdbId(tmdbId) {
+    const details = await fetchMovieDetailsFromTMDb(tmdbId);
+    renderDetails(details, tmdbId);
+}
+
 async function showMovieDetails(movieKey) {
     const movie = allMovies.find(m => m.key === movieKey);
     if (!movie) return;
-    document.getElementById('detailTitle').textContent       = movie.name || '';
-    document.getElementById('detailPoster').src              = movie.poster || '';
-    document.getElementById('detailDescription').textContent = movie.plot || 'No description available.';
-    document.getElementById('detailGenre').textContent       = movie.genre || 'Unknown';
+    renderDetails(movie, movie.tmdbId);
+}
+
+async function renderDetails(data, tmdbId) {
+    document.getElementById('detailTitle').textContent       = data.name || data.title || '';
+    document.getElementById('detailPoster').src              = data.poster || '';
+    document.getElementById('detailDescription').textContent = data.plot || 'No description available.';
+    document.getElementById('detailGenre').textContent       = data.genre || 'Unknown';
+
     const castList = document.getElementById('castList');
     const castSection = document.getElementById('castSection');
     castList.innerHTML = '';
-    if (movie.actors && movie.actors.length > 0) {
+    if (data.actors && data.actors.length > 0) {
         castSection.style.display = 'block';
-        for (const actor of movie.actors) {
+        for (const actor of data.actors) {
             const url = await fetchActorProfile(actor);
             const el = document.createElement('div'); el.className = 'cast-member';
             el.innerHTML = `<img src="${url}" alt="${escHtml(actor)}" loading="lazy"><span>${escHtml(actor)}</span>`;
             castList.appendChild(el);
         }
     } else castSection.style.display = 'none';
+
+    const trailerSection = document.getElementById('trailerSection');
+    const trailerFrame = document.getElementById('detailTrailerFrame');
+    const youtubeId = await fetchYouTubeTrailerId(data.name || data.title, tmdbId);
+    if (youtubeId) {
+        trailerSection.style.display = 'block';
+        trailerFrame.src = `https://www.youtube.com/embed/${youtubeId}?rel=0`;
+    } else {
+        trailerSection.style.display = 'none';
+        trailerFrame.src = '';
+    }
+
     document.getElementById('movieDetailsModal').classList.add('visible');
 }
 
@@ -1526,8 +1717,47 @@ document.getElementById('wannaWatchMoviesButton').addEventListener('click', (e) 
 document.getElementById('searchBox').addEventListener('input', (e) => { currentFilter.search = e.target.value; renderFeed(); });
 
 // Search toggle
-document.getElementById('navSearchToggle')?.addEventListener('click', (e) => { e.preventDefault(); document.getElementById('movieName').focus(); document.getElementById('statusComposer').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
-document.getElementById('mobileSearchToggle')?.addEventListener('click', () => { document.getElementById('movieName').focus(); document.getElementById('statusComposer').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+const openSearch = () => {
+    document.getElementById('searchOverlay').classList.add('visible');
+    document.getElementById('globalSearchInput').focus();
+};
+const closeSearch = () => {
+    document.getElementById('searchOverlay').classList.remove('visible');
+};
+
+document.getElementById('searchFab')?.addEventListener('click', openSearch);
+document.getElementById('mobileSearchToggle')?.addEventListener('click', openSearch);
+document.getElementById('closeSearchBtn')?.addEventListener('click', closeSearch);
+
+const globalSearchInput = document.getElementById('globalSearchInput');
+const searchResultsDropdown = document.getElementById('searchResultsDropdown');
+
+globalSearchInput?.addEventListener('input', () => {
+    clearTimeout(searchTimeout);
+    const q = globalSearchInput.value.trim();
+    if (q.length < 2) { searchResultsDropdown.innerHTML = ''; return; }
+    searchTimeout = setTimeout(async () => {
+        const res  = await fetch(`${tmdbBaseUrl}/search/movie?api_key=${tmdbApiKey}&query=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        const results = data.results || [];
+        searchResultsDropdown.innerHTML = '';
+        results.slice(0, 10).forEach(movie => {
+            const div = document.createElement('div');
+            div.className = 'activity-item';
+            div.style.padding = '10px';
+            div.style.cursor = 'pointer';
+            div.innerHTML = `<strong>${movie.title}</strong> (${movie.release_date?.slice(0,4)})`;
+            div.onclick = () => {
+                closeSearch();
+                showMovieDetailsFromTmdbId(movie.id);
+                // Implicit tracking
+                trackImplicitInteraction(movie.id, 'search');
+                sessionBlacklist.add(movie.id);
+            };
+            searchResultsDropdown.appendChild(div);
+        });
+    }, 500);
+});
 
 // Close suggestions on outside click
 window.addEventListener('click', (e) => {
@@ -1556,25 +1786,51 @@ window.addEventListener('DOMContentLoaded', () => {
         prefetchReelPool(4);
     }
 
-    // ── Mobile bottom nav (dynamically injected) ──
-    const bottomNav = document.createElement('nav');
-    bottomNav.className = 'mobile-bottom-nav';
-    bottomNav.innerHTML = `
-        <a href="#" class="active" title="Feed"><i class="fas fa-home"></i></a>
-        <a href="#" onclick="event.preventDefault(); startDiscoveryGame()" title="Discover"><i class="fas fa-compass"></i></a>
-        <a href="#" id="mobileComposerBtn" title="Post">
-            <i class="fas fa-plus-circle" style="font-size:1.5rem;color:var(--accent);"></i>
-        </a>
-        <a href="#" onclick="event.preventDefault(); openSelectionSlide()" title="Quick Pick"><i class="fas fa-bolt"></i></a>
-        <a href="reels.html" title="Reels"><i class="fas fa-play-circle"></i></a>
-    `;
-    document.body.appendChild(bottomNav);
+// ── Pull to Refresh Logic ──
+    let touchstartY = 0;
+    const mainContent = document.getElementById('mainContent');
+    const ptr = document.getElementById('ptr');
+    const ptrSpinner = document.getElementById('ptrSpinner');
 
-    document.getElementById('mobileComposerBtn')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        document.getElementById('movieName').focus();
-        document.getElementById('statusComposer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    window.addEventListener('touchstart', e => {
+        if (window.scrollY === 0) {
+            touchstartY = e.touches[0].screenY;
+        }
+    }, { passive: true });
+
+    window.addEventListener('touchmove', e => {
+        const touchY = e.touches[0].screenY;
+        const pullDistance = touchY - touchstartY;
+
+        if (window.scrollY === 0 && pullDistance > 0) {
+            // High friction / resistance
+            const resistance = 0.25;
+            const move = Math.min(pullDistance * resistance, 80);
+            ptr.style.transform = `translateY(${move}px)`;
+            ptrSpinner.style.transform = `rotate(${pullDistance * 1.5}deg)`;
+
+            // Haptic-style feedback feel via scale
+            if (move >= 70) ptrSpinner.style.transform += ' scale(1.1)';
+        }
+    }, { passive: true });
+
+    window.addEventListener('touchend', () => {
+        const transform = window.getComputedStyle(ptr).getPropertyValue('transform');
+        const matrix = new DOMMatrix(transform);
+        if (matrix.m42 >= 75) {
+            ptrSpinner.classList.add('refreshing');
+            // Refresh logic
+            setTimeout(() => {
+                location.reload();
+            }, 800);
+        } else {
+            ptr.style.transition = 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+            ptr.style.transform = 'translateY(0)';
+            setTimeout(() => { ptr.style.transition = ''; }, 400);
+        }
     });
+
+// ── Mobile bottom nav (REMOVED) ──
 
     // Responsive padding
     const updatePadding = () => {
