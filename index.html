@@ -168,12 +168,14 @@
        MAIN CONTENT
   ══════════════════════════════════════════════════════════════ -->
   <main class="main-content" id="mainContent">
+    <div id="ptr" class="ptr-container">
+      <div class="ptr-spinner" id="ptrSpinner"></div>
+    </div>
 
     <!-- ── MOBILE HEADER ── -->
     <header class="mobile-header">
       <span class="mobile-logo"><i class="fas fa-film"></i> MovieStreak</span>
       <div class="mobile-header-actions">
-        <i class="fas fa-bolt" id="mobileQuickPick" title="Quick Pick"></i>
         <i class="fas fa-search" id="mobileSearchToggle" title="Search"></i>
         <i class="fas fa-circle-half-stroke" id="mobileThemeToggle" title="Toggle Theme"></i>
         <i class="fas fa-sliders-h" id="mobileFilterToggle" title="Filters"></i>
@@ -402,6 +404,10 @@
         <div class="section-label">Cast</div>
         <div id="castList" class="cast-list"></div>
       </div>
+      <div id="trailerSection" class="trailer-section" style="display:none; padding: 0 24px 24px;">
+        <div class="section-label">Trailer</div>
+        <iframe id="detailTrailerFrame" style="width:100%; aspect-ratio:16/9; border:none; border-radius:8px;" src="" allowfullscreen></iframe>
+      </div>
     </div>
   </div>
 
@@ -573,11 +579,19 @@
   <!-- Toast -->
   <div id="toast" class="toast"></div>
 
-  <!-- Share FAB -->
-  <button class="share-fab" id="shareFab" title="Share App"
-          onclick="shareContent('Check out MovieStreak!', window.location.href)">
-    <i class="fas fa-share-nodes"></i>
+  <!-- Search FAB -->
+  <button class="search-fab" id="searchFab" title="Search Movies">
+    <i class="fas fa-search"></i>
   </button>
+
+  <!-- Search Overlay -->
+  <div id="searchOverlay" class="search-overlay">
+    <div class="search-input-wrap">
+      <input type="text" id="globalSearchInput" class="search-input-field" placeholder="Search TMDb for movies..." autocomplete="off">
+      <button class="search-close-btn" id="closeSearchBtn"><i class="fas fa-times"></i></button>
+    </div>
+    <div id="searchResultsDropdown" class="search-results-dropdown"></div>
+  </div>
 
   <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
